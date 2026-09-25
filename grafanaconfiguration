@@ -49,7 +49,7 @@ services:
 
 
   # ============================================================
-  # Kafka (KRaft Mode - No Zookeeper)
+  # Kafka - KRaft Mode
   # ============================================================
   kafka:
     image: confluentinc/cp-kafka:7.6.0
@@ -58,7 +58,6 @@ services:
       - "9092:9092"
       - "29092:29092"
     environment:
-      # KRaft Configuration
       KAFKA_NODE_ID: 1
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT'
       KAFKA_ADVERTISED_LISTENERS: 'INTERNAL://kafka:9092,EXTERNAL://localhost:29092'
@@ -68,17 +67,18 @@ services:
       KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:9093'
       KAFKA_PROCESS_ROLES: 'broker,controller'
 
-      # Cluster & Topic Settings
       CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
+
     healthcheck:
       test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
       interval: 10s
       timeout: 10s
       retries: 5
+
     networks:
       - banking-network
 
@@ -90,15 +90,19 @@ services:
     build:
       context: ./backend/customer-service
     container_name: customer-service
+
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/customer_db
       DB_USERNAME: banking
       DB_PASSWORD: banking
+
     ports:
       - "8081:8081"
+
     depends_on:
       postgres:
         condition: service_healthy
+
     networks:
       - banking-network
 
@@ -110,14 +114,17 @@ services:
     build:
       context: ./backend/account-service
     container_name: account-service
+
     environment:
       DB_URL: jdbc:postgresql://postgres:5432/account_db
       DB_USERNAME: banking
       DB_PASSWORD: banking
       CUSTOMER_SERVICE_URL: http://customer-service:8081
       KAFKA_BOOTSTRAP_SERVERS: kafka:9092
+
     ports:
       - "8082:8082"
+
     depends_on:
       postgres:
         condition: service_healthy
@@ -125,16 +132,10 @@ services:
         condition: service_started
       kafka:
         condition: service_healthy
+
     networks:
       - banking-network
 
-
-
-grafana:
-  image: grafana/grafana:latest
-  container_name: grafana
-  ports:
-    - "3000:3000"
 
   # ============================================================
   # React Frontend
@@ -143,13 +144,63 @@ grafana:
     build:
       context: ./frontend
     container_name: frontend
+
     ports:
       - "5173:80"
+
     depends_on:
       customer-service:
         condition: service_started
       account-service:
         condition: service_started
+
+    networks:
+      - banking-network
+
+
+  # ============================================================
+  # Prometheus
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+
+    ports:
+      - "9090:9090"
+
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=7d"
+
+    depends_on:
+      - customer-service
+      - account-service
+
+    networks:
+      - banking-network
+
+
+  # ============================================================
+  # Grafana
+  # ============================================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+
+    ports:
+      - "3000:3000"
+
+    volumes:
+      - grafana-data:/var/lib/grafana
+
+    depends_on:
+      - prometheus
+
     networks:
       - banking-network
 
@@ -159,6 +210,8 @@ grafana:
 # ==============================================================
 volumes:
   postgres-data:
+  prometheus-data:
+  grafana-data:
 
 
 # ==============================================================
